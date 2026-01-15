@@ -11,6 +11,7 @@ interface MovingWindows {
   windowLength: number;
   samplingInterval: number;
   movingSpeed: number;
+  optimalType?: 'min' | 'max';  // 寻优类型：min-越低越好，max-越高越好
 }
 
 export interface ModelInfo {

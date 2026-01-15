@@ -26,6 +26,7 @@
       :realtimeData="realtimeTrendData"
       :loading="trendLoading"
       :modelRecord="currentRecord"
+      :optimalType="currentOptimalType"
       @time-range-change="onTrendRangeChange"
       @time-range-query="onTrendRangeQuery"
     />
@@ -50,7 +51,7 @@ import dayjs from 'dayjs';
 import UnitSelect from './UnitSelect.vue';
 import TrendModal from './TrendModal.vue';
 import AnalysisModal from './AnalysisModal.vue';
-import { getOptimisticApi, getBenchmarkHistoryApi, getExaHistoryApi } from '/@/api/benchmark/models';
+import { getOptimisticApi, getBenchmarkHistoryApi, getExaHistoryApi, modelInfoApi } from '/@/api/benchmark/models';
 
 // ========== state ==========
 const loading = ref<boolean>(false);
@@ -68,6 +69,9 @@ const trendLoading = ref<boolean>(false);
 // 分析弹窗相关
 const analysisData = ref<any>(null);
 const analysisLoading = ref<boolean>(false);
+
+// 当前模型的寻优类型
+const currentOptimalType = ref<'min' | 'max'>('min');
 
 // ========== table ==========
 const tableSchema: BasicColumn[] = [
@@ -123,6 +127,67 @@ function normalizeTimeValue(list: any[]): any[] {
     }));
 }
 
+/**
+ * 根据边界参数当前值计算网格索引
+ * @param currentValue 当前值
+ * @param lowerLimit 下限
+ * @param upperLimit 上限
+ * @param gridNumber 网格数
+ * @returns 网格索引 (从0开始)
+ */
+function calculateGridIndex(
+  currentValue: number,
+  lowerLimit: number,
+  upperLimit: number,
+  gridNumber: number
+): number {
+  if (gridNumber <= 0 || upperLimit <= lowerLimit) return 0;
+
+  // 处理边界情况
+  if (currentValue <= lowerLimit) return 0;
+  if (currentValue >= upperLimit) return gridNumber - 1;
+
+  const gridSize = (upperLimit - lowerLimit) / gridNumber;
+  const index = Math.floor((currentValue - lowerLimit) / gridSize);
+
+  // 确保索引在有效范围内
+  return Math.min(Math.max(0, index), gridNumber - 1);
+}
+
+/**
+ * 根据边界参数配置和当前值计算 B_ID
+ * @param boundaryParams 边界参数配置数组
+ * @param boundaryValues 边界参数当前值数组
+ * @returns B_ID 字符串，格式如 "B-3-9" 或 "3-9"
+ */
+function calculateBID(
+  boundaryParams: Array<{ lowerlimit: number; upperlimit: number; gridNumber: number }>,
+  boundaryValues: number[]
+): string {
+  if (!boundaryParams || boundaryParams.length === 0 || !boundaryValues || boundaryValues.length === 0) {
+    return '';
+  }
+
+  const gridIndices: number[] = [];
+
+  for (let i = 0; i < boundaryParams.length && i < boundaryValues.length; i++) {
+    const param = boundaryParams[i];
+    const value = boundaryValues[i];
+
+    const gridIndex = calculateGridIndex(
+      value,
+      Number(param.lowerlimit) || 0,
+      Number(param.upperlimit) || 100,
+      Number(param.gridNumber) || 10
+    );
+
+    gridIndices.push(gridIndex);
+  }
+
+  // 返回格式如 "B-3-9" 或根据后端要求调整
+  return 'B-' + gridIndices.join('-');
+}
+
 // ========== main ==========
 async function getOptimistic() {
   const params = {
@@ -147,17 +212,74 @@ function handleOptionSelected(values: any) {
   getOptimistic();
 }
 
+/**
+ * 解析边界参数值字符串/数组为数值数组
+ */
+function parseBoundaryValues(boundaryValue: any): number[] {
+  if (!boundaryValue) return [];
+
+  const bvStr = String(boundaryValue);
+  if (bvStr.startsWith('[')) {
+    try {
+      return JSON.parse(bvStr).map(Number);
+    } catch {
+      return bvStr.replace(/[\[\]]/g, '').split(',').map(Number);
+    }
+  }
+  return bvStr.split(',').map(Number);
+}
+
 async function fetchTrendByParams(params: { modelId: number; st?: string; et?: string }) {
   try {
     trendLoading.value = true;
 
-    // 蓝线：SQL
-    const bestResp = await getBenchmarkHistoryApi(params);
+    // 获取模型信息，以便获取边界参数配置
+    const modelInfo = await modelInfoApi(params.modelId);
+    const boundaryParams = modelInfo?.boundaryParameter || [];
+    const optimalType = modelInfo?.movingWindows?.optimalType || 'min';
+
+    // 更新当前寻优类型供 TrendModal 使用
+    currentOptimalType.value = optimalType as 'min' | 'max';
+
+    // 黄线：EXA 实时数据（包含边界参数实时值）
+    const exaResp = await getExaHistoryApi(params);
+    const exaList = unwrapList(exaResp);
+    realtimeTrendData.value = normalizeTimeValue(exaList);
+
+    // 如果没有边界参数配置，直接获取所有最优值（兼容旧逻辑）
+    if (boundaryParams.length === 0) {
+      const bestResp = await getBenchmarkHistoryApi(params);
+      trendData.value = normalizeTimeValue(unwrapList(bestResp));
+      return;
+    }
+
+    // 获取当前边界参数的实时值（从 currentRecord 或 EXA 数据中）
+    let currentBoundaryValues: number[] = [];
+
+    // 优先从 currentRecord 中获取当前边界值
+    if (currentRecord.value?.boundaryValue) {
+      currentBoundaryValues = parseBoundaryValues(currentRecord.value.boundaryValue);
+    } else if (exaList.length > 0) {
+      // 如果 EXA 数据包含边界参数值，取最新的
+      const latestExa = exaList[exaList.length - 1];
+      if (latestExa?.boundaryValues) {
+        currentBoundaryValues = parseBoundaryValues(latestExa.boundaryValues);
+      }
+    }
+
+    // 计算 B_ID
+    const bId = calculateBID(boundaryParams, currentBoundaryValues);
+    console.log('计算得到的 B_ID:', bId, '边界参数值:', currentBoundaryValues);
+
+    // 蓝线：SQL 带 B_ID 筛选
+    const benchmarkParams = {
+      ...params,
+      b_id: bId,  // 添加 B_ID 筛选参数
+      type: optimalType,  // 添加寻优类型 (min/max)
+    };
+    const bestResp = await getBenchmarkHistoryApi(benchmarkParams);
     trendData.value = normalizeTimeValue(unwrapList(bestResp));
 
-    // 黄线：EXA
-    const exaResp = await getExaHistoryApi(params);
-    realtimeTrendData.value = normalizeTimeValue(unwrapList(exaResp));
   } catch (error) {
     console.error('获取或显示趋势数据时出错:', error);
     trendData.value = [];
