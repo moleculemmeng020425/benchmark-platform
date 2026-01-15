@@ -246,10 +246,13 @@ async function fetchTrendByParams(params: { modelId: number; st?: string; et?: s
     const exaList = unwrapList(exaResp);
     realtimeTrendData.value = normalizeTimeValue(exaList);
 
-    // 蓝线：尝试带 B_ID 筛选的请求
+    // TODO: 后端支持 b_id 和 type 参数后，将此开关设为 true
+    const ENABLE_BID_FILTER = false;
+
+    // 蓝线：获取历史最优值
     let bestResp;
 
-    if (boundaryParams.length > 0) {
+    if (ENABLE_BID_FILTER && boundaryParams.length > 0) {
       // 获取当前边界参数的实时值
       let currentBoundaryValues: number[] = [];
 
@@ -265,20 +268,15 @@ async function fetchTrendByParams(params: { modelId: number; st?: string; et?: s
       const bId = calculateBID(boundaryParams, currentBoundaryValues);
       console.log('计算得到的 B_ID:', bId, '边界参数值:', currentBoundaryValues);
 
-      try {
-        // 尝试带 B_ID 和 type 参数请求
-        const benchmarkParams = {
-          ...params,
-          b_id: bId,
-          type: optimalType,
-        };
-        bestResp = await getBenchmarkHistoryApi(benchmarkParams);
-      } catch (e) {
-        // 如果后端不支持这些参数，fallback 到原始请求
-        console.warn('带 B_ID 筛选请求失败，回退到原始请求:', e);
-        bestResp = await getBenchmarkHistoryApi(params);
-      }
+      // 带 B_ID 和 type 参数请求
+      const benchmarkParams = {
+        ...params,
+        b_id: bId,
+        type: optimalType,
+      };
+      bestResp = await getBenchmarkHistoryApi(benchmarkParams);
     } else {
+      // 原始请求（不带 B_ID 筛选）
       bestResp = await getBenchmarkHistoryApi(params);
     }
 
