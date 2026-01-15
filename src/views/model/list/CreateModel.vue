@@ -7,6 +7,7 @@
           <a-step title="目标参数选择" />
           <a-step title="边界参数选择" />
           <a-step title="相关参数选择" />
+          <a-step title="寻优逻辑" />
           <a-step title="完成" />
         </a-steps>
       </div>
@@ -28,13 +29,20 @@
         />
         <Step4
           :beforeData="step3Data"
-          :systemId="systemId"
           @prev="handleStepPrev"
           @next="handleStep4Next"
           v-show="current === 3"
           v-if="initStep4"
         />
-        <Step5 :modelId="step4Data" v-show="current === 4" @redo="handleRedo" v-if="initStep5" />
+        <Step5
+          :beforeData="step4Data"
+          :systemId="systemId"
+          @prev="handleStepPrev"
+          @next="handleStep5Next"
+          v-show="current === 4"
+          v-if="initStep5"
+        />
+        <Step6 :modelId="step5Data" v-show="current === 5" @redo="handleRedo" v-if="initStep6" />
       </div>
     </PageWrapper>
   </BasicDrawer>
@@ -49,6 +57,7 @@
   import Step3 from './step/Step3.vue';
   import Step4 from './step/Step4.vue';
   import Step5 from './step/Step5.vue';
+  import Step6 from './step/Step6.vue';
 
   export default defineComponent({
     components: {
@@ -57,6 +66,7 @@
       Step3,
       Step4,
       Step5,
+      Step6,
       BasicDrawer,
       PageWrapper,
       [Steps.name]: Steps,
@@ -73,12 +83,14 @@
       const step2Data = ref(null);
       const step3Data = ref(null);
       const step4Data = ref(null);
+      const step5Data = ref(null);
 
       const state = reactive({
         initStep2: false,
         initStep3: false,
         initStep4: false,
         initStep5: false,
+        initStep6: false,
       });
       function handleStep1Next(step1Values: any) {
         current.value++;
@@ -107,6 +119,12 @@
         console.log(444, step4Values);
         state.initStep5 = true;
       }
+      function handleStep5Next(step5Values: any) {
+        current.value++;
+        step5Data.value = step5Values;
+        console.log(555, step5Values);
+        state.initStep6 = true;
+      }
 
       function handleRedo() {
         current.value = 0;
@@ -114,12 +132,14 @@
         state.initStep3 = false;
         state.initStep4 = false;
         state.initStep5 = false;
+        state.initStep6 = false;
       }
       return {
         step1Data,
         step2Data,
         step3Data,
         step4Data,
+        step5Data,
         current,
         handleRedo,
         handleStepPrev,
@@ -127,6 +147,7 @@
         handleStep2Next,
         handleStep3Next,
         handleStep4Next,
+        handleStep5Next,
         ...toRefs(state),
       };
     },
@@ -139,7 +160,7 @@
   }
 
   .step-form-form {
-    width: 750px;
+    width: 850px;
     margin: 0 auto;
   }
 </style>

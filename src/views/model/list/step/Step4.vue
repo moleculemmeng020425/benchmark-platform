@@ -74,7 +74,7 @@
           text: '上一步',
         },
         submitButtonOptions: {
-          text: '创建模型',
+          text: '下一步',
         },
         resetFunc: customResetFunc,
         submitFunc: customSubmitFunc,
