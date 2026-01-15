@@ -108,6 +108,7 @@ const props = defineProps({
   realtimeData: { type: Array as PropType<Point[]>, default: () => [] }, // real
   loading: { type: Boolean, default: false },
   modelRecord: { type: Object as PropType<ModelRecord>, default: () => ({}) },
+  optimalType: { type: String as PropType<'min' | 'max'>, default: 'min' }, // 寻优类型
 });
 
 const emit = defineEmits<{
@@ -293,8 +294,7 @@ const latestBestValue = computed(() => {
 
 // 优化方向（目标值越低越好 = min，越高越好 = max）
 const optimizeDirection = computed(() => {
-  // 从 modelRecord 的 historyBest 或其他字段推断，默认是越低越好
-  return '越低越好';
+  return props.optimalType === 'max' ? '越高越好' : '越低越好';
 });
 
 // 差值计算
@@ -313,7 +313,12 @@ const valueCompareClass = computed(() => {
   const best = latestBestValue.value;
   if (real == null || best == null) return '';
   const diff = parseFloat(real) - parseFloat(best);
-  // 目标值越低越好，所以实时值大于最优值是不好的
+  // 根据 optimalType 判断好坏
+  // min: 实时值小于最优值是好的（diff < 0）
+  // max: 实时值大于最优值是好的（diff > 0）
+  if (props.optimalType === 'max') {
+    return diff > 0 ? 'value-good' : 'value-bad';
+  }
   return diff > 0 ? 'value-bad' : 'value-good';
 });
 
@@ -323,7 +328,26 @@ const diffClass = computed(() => {
   const best = latestBestValue.value;
   if (real == null || best == null) return '';
   const diff = parseFloat(real) - parseFloat(best);
+  // 根据 optimalType 判断差值的好坏
+  if (props.optimalType === 'max') {
+    return diff > 0 ? 'diff-good' : 'diff-bad';
+  }
   return diff > 0 ? 'diff-bad' : 'diff-good';
+});
+
+// 判断当前值是否优于最优值
+const isCurrentBetter = computed(() => {
+  const real = latestRealValue.value;
+  const best = latestBestValue.value;
+  if (real == null || best == null) return null;
+  const realNum = parseFloat(real);
+  const bestNum = parseFloat(best);
+  // min: 越小越好，realNum < bestNum 表示更优
+  // max: 越大越好，realNum > bestNum 表示更优
+  if (props.optimalType === 'max') {
+    return realNum > bestNum;
+  }
+  return realNum < bestNum;
 });
 
 // 状态文字
@@ -331,8 +355,9 @@ const statusText = computed(() => {
   const real = latestRealValue.value;
   const best = latestBestValue.value;
   if (real == null || best == null) return '数据不足';
-  const diff = parseFloat(real) - parseFloat(best);
-  if (diff <= 0) return '优于最优值';
+  const diff = Math.abs(parseFloat(real) - parseFloat(best));
+
+  if (isCurrentBetter.value) return '优于最优值';
   if (diff < 5) return '接近最优值';
   return '需要优化';
 });
@@ -342,8 +367,9 @@ const statusColor = computed(() => {
   const real = latestRealValue.value;
   const best = latestBestValue.value;
   if (real == null || best == null) return 'default';
-  const diff = parseFloat(real) - parseFloat(best);
-  if (diff <= 0) return 'success';
+  const diff = Math.abs(parseFloat(real) - parseFloat(best));
+
+  if (isCurrentBetter.value) return 'success';
   if (diff < 5) return 'warning';
   return 'error';
 });
