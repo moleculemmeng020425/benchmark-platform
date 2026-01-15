@@ -246,38 +246,42 @@ async function fetchTrendByParams(params: { modelId: number; st?: string; et?: s
     const exaList = unwrapList(exaResp);
     realtimeTrendData.value = normalizeTimeValue(exaList);
 
-    // 如果没有边界参数配置，直接获取所有最优值（兼容旧逻辑）
-    if (boundaryParams.length === 0) {
-      const bestResp = await getBenchmarkHistoryApi(params);
-      trendData.value = normalizeTimeValue(unwrapList(bestResp));
-      return;
-    }
+    // 蓝线：尝试带 B_ID 筛选的请求
+    let bestResp;
 
-    // 获取当前边界参数的实时值（从 currentRecord 或 EXA 数据中）
-    let currentBoundaryValues: number[] = [];
+    if (boundaryParams.length > 0) {
+      // 获取当前边界参数的实时值
+      let currentBoundaryValues: number[] = [];
 
-    // 优先从 currentRecord 中获取当前边界值
-    if (currentRecord.value?.boundaryValue) {
-      currentBoundaryValues = parseBoundaryValues(currentRecord.value.boundaryValue);
-    } else if (exaList.length > 0) {
-      // 如果 EXA 数据包含边界参数值，取最新的
-      const latestExa = exaList[exaList.length - 1];
-      if (latestExa?.boundaryValues) {
-        currentBoundaryValues = parseBoundaryValues(latestExa.boundaryValues);
+      if (currentRecord.value?.boundaryValue) {
+        currentBoundaryValues = parseBoundaryValues(currentRecord.value.boundaryValue);
+      } else if (exaList.length > 0) {
+        const latestExa = exaList[exaList.length - 1];
+        if (latestExa?.boundaryValues) {
+          currentBoundaryValues = parseBoundaryValues(latestExa.boundaryValues);
+        }
       }
+
+      const bId = calculateBID(boundaryParams, currentBoundaryValues);
+      console.log('计算得到的 B_ID:', bId, '边界参数值:', currentBoundaryValues);
+
+      try {
+        // 尝试带 B_ID 和 type 参数请求
+        const benchmarkParams = {
+          ...params,
+          b_id: bId,
+          type: optimalType,
+        };
+        bestResp = await getBenchmarkHistoryApi(benchmarkParams);
+      } catch (e) {
+        // 如果后端不支持这些参数，fallback 到原始请求
+        console.warn('带 B_ID 筛选请求失败，回退到原始请求:', e);
+        bestResp = await getBenchmarkHistoryApi(params);
+      }
+    } else {
+      bestResp = await getBenchmarkHistoryApi(params);
     }
 
-    // 计算 B_ID
-    const bId = calculateBID(boundaryParams, currentBoundaryValues);
-    console.log('计算得到的 B_ID:', bId, '边界参数值:', currentBoundaryValues);
-
-    // 蓝线：SQL 带 B_ID 筛选
-    const benchmarkParams = {
-      ...params,
-      b_id: bId,  // 添加 B_ID 筛选参数
-      type: optimalType,  // 添加寻优类型 (min/max)
-    };
-    const bestResp = await getBenchmarkHistoryApi(benchmarkParams);
     trendData.value = normalizeTimeValue(unwrapList(bestResp));
 
   } catch (error) {
